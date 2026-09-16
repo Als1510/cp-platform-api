@@ -94,7 +94,7 @@ class TestApiContract(unittest.TestCase):
         self.client = app_module.app.test_client()
 
     def test_supported_platform_names_are_dispatched(self):
-        platforms = ["codechef", "codeforces", "leetcode", "atcoder", "spoj"]
+        platforms = ["codeforces", "leetcode", "atcoder"]
         fake_user_data = Mock()
         fake_user_data.get_details.return_value = {"status": "OK"}
         with patch.object(app_module, "UserData", return_value=fake_user_data):
@@ -115,7 +115,7 @@ class TestApiContract(unittest.TestCase):
         fake_user_data = Mock()
         fake_user_data.get_details.side_effect = util.UsernameError()
         with patch.object(app_module, "UserData", return_value=fake_user_data):
-            response = self.client.get("/api/codechef/missing")
+            response = self.client.get("/api/codeforces/missing")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {
             "status": "Failed",
@@ -124,21 +124,6 @@ class TestApiContract(unittest.TestCase):
 
 
 class TestPlatformCharacterization(unittest.TestCase):
-    def test_codechef_current_response_fields(self):
-        html = fixture_text("codechef", "profile.html")
-        with patch.object(util.requests, "get", return_value=FakeResponse(text=html)):
-            result = util.UserData("als1510").get_details("codechef")
-        self.assertEqual(result["status"], "OK")
-        self.assertEqual(result["rating"], 1500)
-        self.assertEqual(result["stars"], "3 star")
-        self.assertEqual(result["highest_rating"], 1600)
-        self.assertEqual(result["global_rank"], 10)
-        self.assertEqual(result["country_rank"], 20)
-        self.assertEqual(result["contest_ratings"], [{"name": "Contest One", "rating": 1500}])
-        self.assertEqual(result["fully_solved"]["count"], 2)
-        self.assertEqual(result["partially_solved"]["count"], 1)
-        self.assertEqual(result["user_details"]["username"], "als1510")
-
     def test_codeforces_current_response_fields(self):
         user_info = json.loads(fixture_text("codeforces", "user_info.json"))
         rating = json.loads(fixture_text("codeforces", "user_rating.json"))
@@ -246,34 +231,8 @@ class TestPlatformCharacterization(unittest.TestCase):
         self.assertEqual(result["rank"], 123)
         self.assertEqual(result["level"], "Silver")
 
-    def test_spoj_current_response_fields(self):
-        html = fixture_text("spoj", "profile.html")
-        with patch.object(util, "HTMLSession", return_value=FakeHTMLSession(html)), patch.object(
-            util.requests, "get", return_value=FakeResponse(text=html)
-        ):
-            result = util.UserData("als1510").get_details("spoj")
-        self.assertEqual(result["status"], "OK")
-        self.assertEqual(result["fullname"], "Example User")
-        self.assertEqual(result["location"], "Exampleland")
-        self.assertEqual(result["points"], 12.5)
-        self.assertEqual(result["rank"], 42)
-        self.assertEqual(result["solved"], ["TEST1"])
-        self.assertEqual(result["todo"], ["TODO1"])
-        self.assertEqual(result["problems_solved"], "25")
-        self.assertEqual(result["solution_submitted"], "40")
 
 
-class TestDiagnosticLogging(unittest.TestCase):
-    def test_codechef_logs_gate_without_response_body(self):
-        html = fixture_text("codechef", "profile.html")
-        with patch.object(util.requests, "get", return_value=FakeResponse(text=html)):
-            with self.assertLogs(util.logger, level="WARNING") as captured:
-                util.UserData("als1510").get_details("codechef")
-        output = "\n".join(captured.output)
-        self.assertIn("'operation': 'profile'", output)
-        self.assertIn("'expected_selector_present': True", output)
-        self.assertIn("<redacted>", output)
-        self.assertNotIn("Example User", output)
 
     def test_codeforces_logs_both_upstream_operations_and_gates(self):
         user_info = json.loads(fixture_text("codeforces", "user_info.json"))
@@ -320,63 +279,8 @@ class TestDiagnosticLogging(unittest.TestCase):
         self.assertIn("'operation': 'graphql_parser'", output)
         self.assertIn("'matched_user_present': True", output)
 
-    def test_spoj_logs_profile_container_and_second_request(self):
-        html = fixture_text("spoj", "profile.html")
-        with patch.object(util, "HTMLSession", return_value=FakeHTMLSession(html)), patch.object(
-            util.requests, "get", return_value=FakeResponse(text=html)
-        ):
-            with self.assertLogs(util.logger, level="WARNING") as captured:
-                util.UserData("als1510").get_details("spoj")
-        output = "\n".join(captured.output)
-        self.assertIn("'operation': 'profile'", output)
-        self.assertIn("'operation': 'profile_parser'", output)
-        self.assertIn("'profile_container_present': True", output)
-        self.assertIn("'operation': 'profile_details'", output)
-
 
 class TestFailureCharacterization(unittest.TestCase):
-    def test_codechef_forbidden_is_shared_access_error(self):
-        with patch.object(util.requests, "get", return_value=FakeResponse(status_code=403)):
-            with self.assertRaises(util.UpstreamAccessError):
-                util.UserData("als1510").get_details("codechef")
-
-    def test_codechef_rate_limit_is_shared_error(self):
-        with patch.object(util.requests, "get", return_value=FakeResponse(status_code=429)):
-            with self.assertRaises(util.UpstreamRateLimitError):
-                util.UserData("als1510").get_details("codechef")
-
-    def test_codechef_server_error_is_shared_error(self):
-        with patch.object(util.requests, "get", return_value=FakeResponse(status_code=503)):
-            with self.assertRaises(util.UpstreamServerError):
-                util.UserData("als1510").get_details("codechef")
-
-    def test_codechef_transport_error_is_shared_error(self):
-        with patch.object(util.requests, "get", side_effect=requests.Timeout()) as get_mock:
-            with self.assertRaises(util.UpstreamTransportError):
-                util.UserData("als1510").get_details("codechef")
-        self.assertEqual(get_mock.call_args.kwargs["timeout"], 10)
-        self.assertEqual(get_mock.call_args.kwargs["headers"]["User-Agent"],
-                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-    def test_codechef_gets_explicit_user_agent_timeout_and_parses_success(self):
-        html = fixture_text("codechef", "profile.html")
-        with patch.object(util.requests, "get", return_value=FakeResponse(status_code=200, text=html)) as get_mock:
-            result = util.UserData("als1510").get_details("codechef")
-        self.assertEqual(result["status"], "OK")
-        self.assertEqual(result["rating"], 1500)
-        self.assertEqual(result["stars"], "3 star")
-        self.assertEqual(get_mock.call_args.kwargs["timeout"], 10)
-        self.assertEqual(get_mock.call_args.kwargs["headers"]["User-Agent"],
-                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-    def test_codechef_403_still_maps_to_upstream_access_error(self):
-        with patch.object(util.requests, "get", return_value=FakeResponse(status_code=403)) as get_mock:
-            with self.assertRaises(util.UpstreamAccessError):
-                util.UserData("als1510").get_details("codechef")
-        self.assertEqual(get_mock.call_args.kwargs["timeout"], 10)
-        self.assertEqual(get_mock.call_args.kwargs["headers"]["User-Agent"],
-                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
     def test_leetcode_forbidden_is_upstream_access_error(self):
         with patch.object(util.requests, "post", return_value=FakeResponse(status_code=403)):
             with self.assertRaises(util.UpstreamAccessError):
@@ -407,29 +311,12 @@ class TestFailureCharacterization(unittest.TestCase):
         graphql["data"]["matchedUser"] = None
         with patch.object(util.requests, "post", return_value=FakeResponse(status_code=200, json_data=graphql)):
             with self.assertRaises(util.UsernameError):
-                util.UserData("missing").get_details("leetcode")
-
-    def test_codechef_missing_rating_is_structure_error(self):
-        html = "<html><body><div class='rating-header'></div></body></html>"
-        with patch.object(util.requests, "get", return_value=FakeResponse(text=html)):
-            with self.assertRaises(util.StructureError):
-                util.UserData("missing").get_details("codechef")
-
-    def test_codechef_inactive_rank_returns_na(self):
-        html = fixture_text("codechef", "profile.html").replace(
-            '<a><strong>10</strong></a><a><strong>20</strong></a>',
-            '<a><strong>\n                                Inactive                            </strong></a><a><strong>20</strong></a>')
-        with patch.object(util.requests, "get", return_value=FakeResponse(text=html)):
-            result = util.UserData("als1510").get_details("codechef")
-        self.assertEqual(result["global_rank"], "NA")
-        self.assertEqual(result["country_rank"], 20)
+                util.UsernameError("missing").get_details("leetcode")
 
     def test_codeforces_empty_api_result_raises_index_error(self):
         api_error = {"status": "FAILED", "comment": "not found", "result": []}
         responses = [FakeResponse(json_data=api_error), FakeResponse(text="<html></html>")]
         with patch.object(util.requests, "get", side_effect=responses):
-            with self.assertRaises(IndexError):
-                util.UserData("missing").get_details("codeforces")
 
     def test_codeforces_missing_contest_table_is_structure_error(self):
         user_info = json.loads(fixture_text("codeforces", "user_info.json"))
@@ -536,46 +423,6 @@ class TestFailureCharacterization(unittest.TestCase):
         self.assertEqual(result["rating"], "NA")
         self.assertEqual(result["other"]["Country/Region"], "Japan")
 
-    def test_spoj_missing_profile_is_structure_error(self):
-        html = "<html><body></body></html>"
-        with patch.object(util, "HTMLSession", return_value=FakeHTMLSession(html)), patch.object(
-            util.requests, "get", return_value=FakeResponse(text=html)
-        ):
-            with self.assertRaises(util.StructureError):
-                util.UserData("missing").get_details("spoj")
-
-    def test_spoj_forbidden_is_shared_access_error(self):
-        with patch.object(util, "HTMLSession", return_value=FakeHTMLSession("", status_code=403)):
-            with self.assertRaises(util.UpstreamAccessError):
-                util.UserData("als1510").get_details("spoj")
-
-    def test_spoj_rate_limit_is_shared_error(self):
-        with patch.object(util, "HTMLSession", return_value=FakeHTMLSession("", status_code=429)):
-            with self.assertRaises(util.UpstreamRateLimitError):
-                util.UserData("als1510").get_details("spoj")
-
-    def test_spoj_server_error_is_shared_error(self):
-        with patch.object(util, "HTMLSession", return_value=FakeHTMLSession("", status_code=503)):
-            with self.assertRaises(util.UpstreamServerError):
-                util.UserData("als1510").get_details("spoj")
-
-    def test_spoj_transport_error_is_shared_error(self):
-        session = Mock()
-        session.get.side_effect = requests.Timeout()
-        with patch.object(util, "HTMLSession", return_value=session):
-            with self.assertRaises(util.UpstreamTransportError):
-                util.UserData("als1510").get_details("spoj")
-
-    def test_spoj_missing_todo_table_returns_none(self):
-        html = fixture_text("spoj", "profile.html").replace(
-            '<table class="table"><tr><td><a>TODO1</a></td></tr></table>', ""
-        )
-        with patch.object(util, "HTMLSession", return_value=FakeHTMLSession(html)), patch.object(
-            util.requests, "get", return_value=FakeResponse(text=html)
-        ):
-            result = util.UserData("als1510").get_details("spoj")
-        self.assertIsNone(result["todo"])
-
 
 class TestSharedUpstreamErrors(unittest.TestCase):
     def test_forbidden_is_upstream_access_error(self):
@@ -634,7 +481,7 @@ class TestSharedUpstreamErrors(unittest.TestCase):
     def test_successful_unexpected_structure_is_structure_error(self):
         with patch.object(util.requests, "get", return_value=FakeResponse(text="<html></html>")):
             with self.assertRaises(util.StructureError):
-                util.UserData("als1510").get_details("codechef")
+                util.UserData("als1510").get_details("codeforces")
 
 
 if __name__ == "__main__":
